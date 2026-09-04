@@ -1,7 +1,10 @@
 import { prisma, toDecimal, toNumber } from '@flowmoney/database';
 import type {
+  DeletedTransactionView,
   FinancialProductView,
   InvestmentProfileView,
+  LogTransactionInput,
+  LoggedTransactionView,
   PaymentAuthorizationRequest,
   PaymentAuthorizationView,
   SavingsGoalView,
@@ -20,6 +23,7 @@ import { buildRecommendation } from './investment.service';
 import { getInvestmentProfile, searchProducts } from './investment.service';
 import { createPaymentIntent } from './payment.service';
 import { analyzePurchase } from './purchase.service';
+import { deleteTransaction, logManualTransaction } from './transaction.service';
 import { generateMonthlyReport } from './report.service';
 
 /**
@@ -158,6 +162,34 @@ export const toolRuntime: ToolRuntime = {
       monthsToTarget:
         monthlyContribution > 0 ? Math.ceil(input.targetAmount / monthlyContribution) : null,
     };
+  },
+
+  async logTransaction(
+    userId: string,
+    input: LogTransactionInput,
+    options: { channel: string },
+  ): Promise<LoggedTransactionView> {
+    const result = await logManualTransaction(
+      userId,
+      {
+        amount: input.amount,
+        direction: input.direction,
+        categoryKey: input.categoryKey,
+        description: input.description,
+        merchant: input.merchant ?? null,
+        isRecurring: input.isRecurring ?? false,
+      },
+      options.channel,
+    );
+    return result;
+  },
+
+  async deleteTransaction(
+    userId: string,
+    transactionId: string,
+    options: { channel: string },
+  ): Promise<DeletedTransactionView> {
+    return deleteTransaction(userId, transactionId, options.channel);
   },
 
   async requestPaymentAuthorization(

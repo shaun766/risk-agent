@@ -13,10 +13,11 @@ import {
   type SavingsOpportunity,
   type SpendingAnomaly,
   type StructuredAIResponse,
+  categoryLabel,
   formatINR,
   round,
 } from '@flowmoney/shared-types';
-import type { TransactionSummaryRow } from './types';
+import type { DeletedTransactionView, LoggedTransactionView, TransactionSummaryRow } from './types';
 
 export interface RenderedReply {
   text: string;
@@ -465,6 +466,74 @@ export function renderGreeting(userName: string, snapshot: FinancialSnapshot): R
       { label: 'How am I doing?', command: 'how am I doing financially' },
       { label: 'This month’s spending', command: 'how much did I spend this month' },
     ],
+  };
+}
+
+export function renderTransactionLogged(logged: LoggedTransactionView): RenderedReply {
+  const text = `Logged ${formatINR(logged.amount)} ${logged.direction === 'CREDIT' ? 'received' : 'for'} ${categoryLabel(logged.categoryKey)}. Balance now ${formatINR(logged.balanceAfter)}.`;
+
+  return {
+    text,
+    structured: {
+      summary: `${logged.direction === 'CREDIT' ? '+' : '-'}${formatINR(logged.amount)} logged under ${categoryLabel(logged.categoryKey)}.`,
+      recommendation: 'Transaction recorded.',
+      reasons: [],
+      nextActions: [],
+      riskLevel: RiskLevel.LOW,
+    },
+    quickActions: [
+      { label: 'How am I doing this week?', command: 'how am I doing this week' },
+      { label: 'Log another', command: 'log' },
+    ],
+  };
+}
+
+export function renderTransactionDeleted(deleted: DeletedTransactionView): RenderedReply {
+  const text = `Deleted ${formatINR(deleted.amount)} — ${deleted.description}. Balance now ${formatINR(deleted.balanceAfter)}.`;
+
+  return {
+    text,
+    structured: {
+      summary: `Deleted ${formatINR(deleted.amount)} (${deleted.description}).`,
+      recommendation: 'Transaction removed.',
+      reasons: [],
+      nextActions: [],
+      riskLevel: RiskLevel.LOW,
+    },
+    quickActions: [],
+  };
+}
+
+/** No single unambiguous match — list candidates instead of guessing which one to delete. */
+export function renderDeletionAmbiguous(candidates: TransactionSummaryRow[]): RenderedReply {
+  if (candidates.length === 0) {
+    return {
+      text: "I couldn't find a matching transaction. Tell me the amount, or say \"delete my last transaction\".",
+      structured: {
+        summary: 'No matching transaction found.',
+        recommendation: 'Specify an amount or ask to delete the most recent transaction.',
+        reasons: [],
+        nextActions: [],
+        riskLevel: RiskLevel.LOW,
+      },
+      quickActions: [],
+    };
+  }
+
+  const lines = candidates
+    .map((t) => `${formatINR(t.amount)} — ${t.merchant ?? t.description} (${t.occurredAt.slice(0, 10)})`)
+    .join('\n');
+
+  return {
+    text: `A few match that — which one?\n${lines}`,
+    structured: {
+      summary: `${candidates.length} possible matches found.`,
+      recommendation: 'Ask the user to specify which transaction to delete.',
+      reasons: [],
+      nextActions: [],
+      riskLevel: RiskLevel.LOW,
+    },
+    quickActions: [],
   };
 }
 

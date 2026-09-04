@@ -182,6 +182,33 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
     });
   }
 
+  async sendImage(to: string, image: Buffer, caption?: string): Promise<SendResult> {
+    if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
+      throw serviceUnavailable('WhatsApp is not configured');
+    }
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', 'image/png');
+    form.append('file', new Blob([new Uint8Array(image)], { type: 'image/png' }), 'chart.png');
+
+    const upload = await fetch(`${this.baseUrl}/${env.WHATSAPP_PHONE_NUMBER_ID}/media`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` },
+      body: form,
+    });
+    const uploaded = (await upload.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+    if (!upload.ok || !uploaded.id) {
+      return { externalId: '', status: 'FAILED', error: uploaded.error?.message ?? 'media upload failed' };
+    }
+
+    return this.post('/messages', {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'image',
+      image: { id: uploaded.id, ...(caption ? { caption: caption.slice(0, 1024) } : {}) },
+    });
+  }
+
   async downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }> {
     if (!env.WHATSAPP_ACCESS_TOKEN) throw serviceUnavailable('WhatsApp is not configured');
 

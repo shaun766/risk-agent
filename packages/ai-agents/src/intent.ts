@@ -10,11 +10,29 @@ export interface ExtractedPurchase {
   importance: number | null;
 }
 
+export interface ExtractedTransaction {
+  amount: number | null;
+  direction: 'DEBIT' | 'CREDIT';
+  categoryKey: string;
+  description: string;
+  merchant: string | null;
+  isRecurring: boolean;
+}
+
+export interface ExtractedDeletion {
+  /** True for "delete my last transaction" style phrasing — no lookup needed beyond "the most recent one". */
+  mostRecent: boolean;
+  /** An amount mentioned, when the user identifies the transaction by how much it was rather than by recency. */
+  amount: number | null;
+}
+
 export interface IntentResult {
   intent: Intent;
   confidence: number;
   matched: string[];
   purchase: ExtractedPurchase | null;
+  transaction: ExtractedTransaction | null;
+  deletion: ExtractedDeletion | null;
 }
 
 // ------------------------------------------------------------ amount parsing
@@ -134,6 +152,22 @@ export function inferCategory(text: string): string {
     if (pattern.test(text)) return category;
   }
   return 'shopping';
+}
+
+const CREDIT_HINTS = /\b(income|salary|salary credit(ed)?|credited|refund(ed)?|received|got paid|reimburs(ed|ement)|bonus|cashback|payout)\b/i;
+const SALARY_HINTS = /\bsalary|payroll|pay ?check\b/i;
+
+/** Direction and category for a transaction log — separate from purchase inference, which always assumes a future DEBIT. */
+function inferTransactionDirection(text: string): 'DEBIT' | 'CREDIT' {
+  return CREDIT_HINTS.test(text) ? 'CREDIT' : 'DEBIT';
+}
+
+function inferTransactionCategory(text: string, direction: 'DEBIT' | 'CREDIT'): string {
+  if (direction === 'CREDIT') return SALARY_HINTS.test(text) ? 'salary' : 'other_income';
+  for (const [pattern, category] of CATEGORY_HINTS) {
+    if (pattern.test(text)) return category;
+  }
+  return 'other';
 }
 
 // ------------------------------------------------------------ intent rules
@@ -265,6 +299,39 @@ const RULES: IntentRule[] = [
     ],
   },
   {
+    // Weighted the same as PURCHASE_ANALYSIS but the patterns are mutually
+    // exclusive with it: this is strictly past-tense/imperative ("I spent",
+    // "log this", "add an expense") — money that already moved — versus
+    // PURCHASE_ANALYSIS's hypothetical framing ("can I afford", "should I buy",
+    // "thinking of"). A message can only plausibly match one set.
+    intent: Intent.LOG_TRANSACTION,
+    weight: 3,
+    patterns: [
+      /^\s*(log|record|track|note( down)?)\b/i,
+      /\badd (an?|the)? ?(expense|transaction|income)\b/i,
+      // "spent 450 on lunch" is at least as common as "I spent 450 on lunch"
+      // in quick-text style — only anchored to the start of the message (with
+      // an optional "I"/"just"), so it doesn't fire on "...if I've spent too
+      // much" mid-sentence, which is FINANCIAL_BEHAVIOR_ANALYSIS territory.
+      /^\s*(i )?(just )?(spent|paid|bought|purchased)\b/i,
+      /\b(mark|log) (this|that) as (paid|spent|done)\b/i,
+      /^\s*(i )?(just )?(received|got paid|earned|was refunded|got a refund)\b/i,
+    ],
+  },
+  {
+    // Weighted higher than LOG_TRANSACTION's 3 so "delete that 450 lunch
+    // expense" (which contains "expense", a LOG_TRANSACTION-adjacent word)
+    // resolves to deletion, not logging.
+    intent: Intent.DELETE_TRANSACTION,
+    weight: 4,
+    patterns: [
+      /\b(delete|remove|undo|cancel)\b.*\b(transaction|expense|entry|purchase|log)\b/i,
+      /\b(delete|remove)\b.*\b(last|latest|most recent|previous)\b/i,
+      /\bundo (that|this|it)\b/i,
+      /\bthat was a mistake\b/i,
+    ],
+  },
+  {
     intent: Intent.TRANSACTION_LOOKUP,
     weight: 2,
     patterns: [
@@ -299,7 +366,7 @@ const IMPORTANCE_PATTERNS: Array<[RegExp, number]> = [
 export function classifyIntent(message: string): IntentResult {
   const text = message.trim();
   if (!text) {
-    return { intent: Intent.UNKNOWN, confidence: 0, matched: [], purchase: null };
+    return { intent: Intent.UNKNOWN, confidence: 0, matched: [], purchase: null, transaction: null, deletion: null };
   }
 
   const scores = new Map<Intent, { score: number; matched: string[] }>();
@@ -320,6 +387,10 @@ export function classifyIntent(message: string): IntentResult {
     const entry = scores.get(Intent.PURCHASE_ANALYSIS)!;
     entry.score += 2;
   }
+  if (amount !== null && scores.has(Intent.LOG_TRANSACTION)) {
+    const entry = scores.get(Intent.LOG_TRANSACTION)!;
+    entry.score += 2;
+  }
 
   const ranked = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
   const top = ranked[0];
@@ -330,6 +401,8 @@ export function classifyIntent(message: string): IntentResult {
       confidence: 0.3,
       matched: [],
       purchase: null,
+      transaction: null,
+      deletion: null,
     };
   }
 
@@ -353,5 +426,31 @@ export function classifyIntent(message: string): IntentResult {
         }
       : null;
 
-  return { intent: top[0], confidence: Number(confidence.toFixed(2)), matched: top[1].matched, purchase };
+  const transaction = (() => {
+    if (top[0] !== Intent.LOG_TRANSACTION) return null;
+    const direction = inferTransactionDirection(text);
+    return {
+      amount,
+      direction,
+      categoryKey: inferTransactionCategory(text, direction),
+      description: text.slice(0, 200),
+      merchant: null,
+      isRecurring: RECURRING_PATTERN.test(text),
+    };
+  })();
+
+  const MOST_RECENT_PATTERN = /\b(last|latest|most recent|previous|that|this|it)\b/i;
+  const deletion =
+    top[0] === Intent.DELETE_TRANSACTION
+      ? { mostRecent: MOST_RECENT_PATTERN.test(text), amount }
+      : null;
+
+  return {
+    intent: top[0],
+    confidence: Number(confidence.toFixed(2)),
+    matched: top[1].matched,
+    purchase,
+    transaction,
+    deletion,
+  };
 }

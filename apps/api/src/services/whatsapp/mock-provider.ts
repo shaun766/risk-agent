@@ -6,7 +6,9 @@ export interface MockSentMessage {
   to: string;
   body: string;
   buttons?: OutboundButton[];
-  kind: 'text' | 'buttons' | 'audio';
+  /** For kind 'image': a data URL, so the chart can actually be previewed from the outbox. */
+  imageDataUrl?: string;
+  kind: 'text' | 'buttons' | 'audio' | 'image';
   sentAt: string;
 }
 
@@ -70,6 +72,17 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
       to,
       body: `[audio reply · ${audio.length} bytes]`,
       kind: 'audio',
+      sentAt: new Date().toISOString(),
+    });
+    return { externalId: randomUUID(), status: 'SENT' };
+  }
+
+  async sendImage(to: string, image: Buffer, caption?: string): Promise<SendResult> {
+    this.outbox.push({
+      to,
+      body: caption ?? '',
+      kind: 'image',
+      imageDataUrl: `data:image/png;base64,${image.toString('base64')}`,
       sentAt: new Date().toISOString(),
     });
     return { externalId: randomUUID(), status: 'SENT' };

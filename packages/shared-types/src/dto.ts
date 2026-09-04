@@ -111,6 +111,20 @@ export const transactionSummaryQuerySchema = z.object({
   groupBy: z.enum(['category', 'merchant', 'day', 'week']).default('category'),
 });
 
+export const createTransactionSchema = z.object({
+  amount: z.number().finite().positive().max(1_000_000_000),
+  direction: enumOf(TransactionDirection),
+  categoryKey: z.string().trim().min(1).max(60),
+  description: z.string().trim().min(1).max(400),
+  merchant: z.string().trim().max(120).nullish(),
+  /** Defaults to now. Manual entries are usually logged shortly after the fact. */
+  occurredAt: isoDate.nullish(),
+  isRecurring: z.boolean().default(false),
+  /** Defaults to the user's primary spendable account. */
+  accountId: uuid.nullish(),
+});
+export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
+
 // --------------------------------------------------------------- budget --
 
 export const budgetRuleSchema = z.object({

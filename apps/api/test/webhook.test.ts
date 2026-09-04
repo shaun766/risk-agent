@@ -49,9 +49,20 @@ describe('WhatsApp webhook (mock provider)', () => {
     expect(body.processed).toBe(1);
     expect(body.results[0].status).toBe('PROCESSED');
     expect(body.results[0].userId).toBe(shaun.id);
-    // The numbers in the reply come from the deterministic engine, not the LLM.
-    expect(body.results[0].reply).toMatch(/NOT RECOMMENDED|WAIT AND SAVE|CAUTION/i);
-    expect(body.results[0].reply).toContain('50,000');
+    // Wording varies (deterministic template vs. LLM phrasing, and the LLM's
+    // reply is intentionally terse — see packages/shared-types/src/agents.ts),
+    // but the verdict and a real computed figure must always be present. The
+    // authoritative check is the persisted decision itself: the engine, not
+    // the model, produced this verdict.
+    expect(body.results[0].reply).toMatch(/not recommended|wait.{0,10}save|caution/i);
+    expect(body.results[0].reply).toMatch(/₹[\d,]+/);
+
+    const decision = await prisma.purchaseDecision.findFirst({
+      where: { userId: shaun.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(decision?.verdict).toBe('NOT_RECOMMENDED');
+    expect(Number(decision?.price)).toBe(50_000);
   });
 
   it('records an unrecognised phone number without crashing', async () => {

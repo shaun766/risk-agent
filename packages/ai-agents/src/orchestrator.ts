@@ -13,9 +13,12 @@ import * as render from './renderer';
 import { executeTool, resolveAvailableTools, type ToolDefinition } from './tools';
 import type {
   AgentConfig,
+  DeletedTransactionView,
+  LoggedTransactionView,
   OrchestratorInput,
   OrchestratorResult,
   ToolInvocation,
+  TransactionSummaryRow,
 } from './types';
 
 /** Hard stop on the tool loop so a confused model cannot spend money forever. */
@@ -205,6 +208,28 @@ export async function runOrchestrator(
     messages.push({
       role: 'assistant',
       content: `[engine] evaluate_purchase returned: ${JSON.stringify(decision)}`,
+    });
+  }
+
+  // Same reasoning as the purchase case: money the user says already moved
+  // gets written to their ledger deterministically, not left to the model to
+  // decide whether or how to call it.
+  if (
+    classification.intent === Intent.LOG_TRANSACTION &&
+    classification.transaction?.amount &&
+    availableTools.some((tool) => tool.name === ToolName.LOG_TRANSACTION)
+  ) {
+    const logged = await call(ToolName.LOG_TRANSACTION, {
+      amount: classification.transaction.amount,
+      direction: classification.transaction.direction,
+      categoryKey: classification.transaction.categoryKey,
+      description: classification.transaction.description,
+      merchant: classification.transaction.merchant,
+      isRecurring: classification.transaction.isRecurring,
+    });
+    messages.push({
+      role: 'assistant',
+      content: `[engine] log_transaction returned: ${JSON.stringify(logged)}`,
     });
   }
 
@@ -425,6 +450,59 @@ async function runDeterministic(
       if (decision && 'verdict' in decision) {
         return render.renderPurchaseDecision(decision, input.user.fullName);
       }
+    }
+  }
+
+  if (classification.intent === Intent.LOG_TRANSACTION) {
+    if (!classification.transaction?.amount) {
+      return {
+        text: 'How much, and what for? For example "spent 500 on lunch" or "log 1200 for the electrician".',
+        structured: {
+          summary: 'Transaction amount missing.',
+          recommendation: 'Send the amount so it can be logged.',
+          reasons: [],
+          nextActions: [],
+          riskLevel: RiskLevel.LOW,
+        },
+        quickActions: [],
+      };
+    }
+    if (canUse(ToolName.LOG_TRANSACTION)) {
+      const logged = (await call(ToolName.LOG_TRANSACTION, {
+        amount: classification.transaction.amount,
+        direction: classification.transaction.direction,
+        categoryKey: classification.transaction.categoryKey,
+        description: classification.transaction.description,
+        merchant: classification.transaction.merchant,
+        isRecurring: classification.transaction.isRecurring,
+      })) as LoggedTransactionView;
+      if (logged && 'id' in logged) {
+        return render.renderTransactionLogged(logged);
+      }
+    }
+  }
+
+  if (classification.intent === Intent.DELETE_TRANSACTION) {
+    if (canUse(ToolName.GET_RECENT_TRANSACTIONS) && canUse(ToolName.DELETE_TRANSACTION)) {
+      const recent = (await call(ToolName.GET_RECENT_TRANSACTIONS, { limit: 10 })) as TransactionSummaryRow[];
+      const candidates = Array.isArray(recent) ? recent : [];
+
+      const target = classification.deletion?.amount
+        ? candidates.filter((t) => Math.abs(t.amount - (classification.deletion!.amount as number)) < 0.01)
+        : classification.deletion?.mostRecent
+          ? candidates.slice(0, 1)
+          : [];
+
+      if (target.length === 1 && target[0]) {
+        const deleted = (await call(ToolName.DELETE_TRANSACTION, {
+          transactionId: target[0].id,
+        })) as DeletedTransactionView;
+        if (deleted && 'id' in deleted) {
+          return render.renderTransactionDeleted(deleted);
+        }
+      }
+
+      return render.renderDeletionAmbiguous(target.length > 1 ? target : candidates.slice(0, 5));
     }
   }
 

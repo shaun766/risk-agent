@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { FormattedReply } from '@/components/dashboard/formatted-reply';
 import { api, ApiError } from '@/lib/api';
 import { RISK_STYLES } from '@/lib/format';
 import type { ChatResponse } from '@/lib/types';
@@ -76,7 +77,9 @@ export function AskAiCard({ compact = false }: { compact?: boolean }) {
               <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
                 <Bot className="h-3.5 w-3.5" />
               </div>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{response.reply}</p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                <FormattedReply text={response.reply} />
+              </p>
             </div>
 
             {response.structured && (

@@ -1,3 +1,7 @@
+// Must run before `../src/config/env` (see env-overrides.ts for why a plain
+// statement here wouldn't work).
+import './env-overrides';
+
 // Must run before `@flowmoney/database` is imported anywhere in the test
 // process: that package constructs its PrismaClient singleton at module load
 // time, reading DATABASE_URL from process.env at that instant. Under

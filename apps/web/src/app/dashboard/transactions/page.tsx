@@ -1,14 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Search } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Plus, Search, Trash2 } from 'lucide-react';
 import { Input, Select } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useApi } from '@/hooks/use-api';
+import { api, ApiError } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/format';
 import type { Paginated, TransactionRow } from '@/lib/types';
+import { AddTransactionModal } from '@/components/dashboard/add-transaction-modal';
+import { Modal } from '@/components/admin/modal';
 
 interface Category {
   key: string;
@@ -20,6 +23,10 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState('');
   const [categoryKey, setCategoryKey] = useState('');
   const [direction, setDirection] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<TransactionRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const categories = useApi<{ categories: Category[] }>('/transactions/categories');
   const transactions = useApi<Paginated<TransactionRow>>(
@@ -28,12 +35,79 @@ export default function TransactionsPage() {
     [page, search, categoryKey, direction],
   );
 
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.delete(`/transactions/${pendingDelete.id}`);
+      setPendingDelete(null);
+      transactions.refetch();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Could not delete this transaction');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Every posted transaction across your linked accounts.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Every posted transaction across your linked accounts.</p>
+        </div>
+        <Button onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Add transaction
+        </Button>
       </div>
+
+      <AddTransactionModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        categories={categories.data?.categories ?? []}
+        onCreated={() => {
+          setAddOpen(false);
+          transactions.refetch();
+        }}
+      />
+
+      <Modal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title="Delete this transaction?"
+        description="This can't be undone — it also reverses the amount against your account balance."
+        className="max-w-md"
+      >
+        {pendingDelete && (
+          <div className="space-y-4">
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <p className="text-sm font-medium">{pendingDelete.merchant || pendingDelete.description}</p>
+              <p className="text-xs text-muted-foreground">
+                {pendingDelete.category.label} · {formatDate(pendingDelete.occurredAt)}
+              </p>
+              <p className={`tabular mt-1 text-sm font-semibold ${pendingDelete.direction === 'CREDIT' ? 'text-success' : ''}`}>
+                {pendingDelete.direction === 'CREDIT' ? '+' : '-'}
+                {formatCurrency(pendingDelete.amount)}
+              </p>
+            </div>
+            {deleteError && (
+              <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {deleteError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setPendingDelete(null)}>
+                Cancel
+              </Button>
+              <Button type="button" variant="destructive" loading={deleting} onClick={() => void confirmDelete()}>
+                Delete transaction
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
@@ -89,7 +163,7 @@ export default function TransactionsPage() {
         ) : (
           <div className="divide-y divide-border/60">
             {transactions.data?.items.map((txn) => (
-              <div key={txn.id} className="flex items-center gap-3 px-4 py-3">
+              <div key={txn.id} className="group flex items-center gap-3 px-4 py-3">
                 <div
                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
                     txn.direction === 'CREDIT' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
@@ -115,6 +189,16 @@ export default function TransactionsPage() {
                     </Badge>
                   )}
                 </div>
+                <button
+                  onClick={() => {
+                    setDeleteError(null);
+                    setPendingDelete(txn);
+                  }}
+                  aria-label={`Delete ${txn.merchant || txn.description}`}
+                  className="shrink-0 rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>

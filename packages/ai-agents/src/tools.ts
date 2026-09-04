@@ -182,6 +182,41 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
     requiredPermissions: [Permission.AUTHORIZE_OWN_PAYMENT],
     mutating: true,
   },
+  [ToolName.LOG_TRANSACTION]: {
+    name: ToolName.LOG_TRANSACTION,
+    description:
+      'Records a transaction the user tells you already happened — money they spent or received. This actually writes to their transaction history and account balance, unlike evaluate_purchase which only simulates. Only call this for something that already occurred, never for a hypothetical or future purchase.',
+    parameters: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', minimum: 0.01 },
+        direction: { type: 'string', enum: ['DEBIT', 'CREDIT'], description: 'DEBIT for an expense, CREDIT for income/refund.' },
+        categoryKey: { type: 'string', description: 'e.g. dining, groceries, transport, shopping, salary, other.' },
+        description: { type: 'string', minLength: 1, maxLength: 200 },
+        merchant: { type: 'string' },
+        isRecurring: { type: 'boolean' },
+      },
+      required: ['amount', 'direction', 'categoryKey', 'description'],
+      additionalProperties: false,
+    },
+    requiredPermissions: [Permission.MANAGE_OWN_TRANSACTIONS],
+    mutating: true,
+  },
+  [ToolName.DELETE_TRANSACTION]: {
+    name: ToolName.DELETE_TRANSACTION,
+    description:
+      'Permanently deletes one of the user\'s own transactions and reverses its effect on their account balance. This cannot be undone. Only call it with a real transactionId you already have from get_recent_transactions in this conversation — never guess an id, and never call this until the user has clearly confirmed which specific transaction (by amount, merchant and date) they want deleted.',
+    parameters: {
+      type: 'object',
+      properties: {
+        transactionId: { type: 'string', description: 'The id field from a get_recent_transactions result.' },
+      },
+      required: ['transactionId'],
+      additionalProperties: false,
+    },
+    requiredPermissions: [Permission.MANAGE_OWN_TRANSACTIONS],
+    mutating: true,
+  },
 };
 
 /**
@@ -313,6 +348,36 @@ export async function executeTool(
         accountId: str(rawArgs.accountId) ?? undefined,
         purchaseDecisionId: str(rawArgs.purchaseDecisionId),
       });
+    }
+
+    case ToolName.LOG_TRANSACTION: {
+      const amount = num(rawArgs.amount);
+      const direction = str(rawArgs.direction);
+      const categoryKey = str(rawArgs.categoryKey);
+      const description = str(rawArgs.description);
+      if (amount === null || amount <= 0 || (direction !== 'DEBIT' && direction !== 'CREDIT') || !categoryKey || !description) {
+        return { error: 'A positive amount, a direction (DEBIT or CREDIT), a category and a description are required.' };
+      }
+      return runtime.logTransaction(
+        userId,
+        {
+          amount,
+          direction,
+          categoryKey: categoryKey.slice(0, 60),
+          description: description.slice(0, 200),
+          merchant: str(rawArgs.merchant),
+          isRecurring: rawArgs.isRecurring === true,
+        },
+        { channel: context.channel },
+      );
+    }
+
+    case ToolName.DELETE_TRANSACTION: {
+      const transactionId = str(rawArgs.transactionId);
+      if (!transactionId) {
+        return { error: 'A transactionId is required — call get_recent_transactions first to find it.' };
+      }
+      return runtime.deleteTransaction(userId, transactionId, { channel: context.channel });
     }
 
     default:

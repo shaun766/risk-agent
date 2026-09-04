@@ -91,6 +91,13 @@ export class TwilioWhatsAppProvider implements WhatsAppProvider {
     return { externalId: '', status: 'FAILED', error: 'Audio replies require public media hosting' };
   }
 
+  async sendImage(): Promise<SendResult> {
+    // Same constraint as sendAudio: Twilio needs a public MediaUrl, not raw
+    // bytes. Wire object storage (STORAGE_DRIVER=s3) and upload the chart
+    // there first before enabling chart images on this provider.
+    return { externalId: '', status: 'FAILED', error: 'Image replies require public media hosting' };
+  }
+
   async downloadMedia(mediaUrl: string): Promise<{ buffer: Buffer; mimeType: string }> {
     const response = await fetch(mediaUrl, {
       headers: {

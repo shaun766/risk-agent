@@ -1,14 +1,38 @@
 import { Prisma, prisma, toNumber } from '@flowmoney/database';
 import {
   Permission,
+  createTransactionSchema,
   transactionQuerySchema,
   transactionSummaryQuerySchema,
+  uuid,
 } from '@flowmoney/shared-types';
 import { monthKeyOf, parseMonthKey } from '@flowmoney/financial-engine';
 import type { FastifyInstance } from 'fastify';
 import { paginate, skipTake } from '../../lib/pagination';
+import { deleteTransaction, logManualTransaction } from '../../services/transaction.service';
 
 export async function transactionRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * Manual entry — the same primitive the WhatsApp "spent 500 on lunch" flow
+   * uses under the hood, just reached via a form instead of a message.
+   */
+  app.post('/transactions', {
+    preHandler: [app.requirePermission(Permission.MANAGE_OWN_TRANSACTIONS)],
+    handler: async (request, reply) => {
+      const input = createTransactionSchema.parse(request.body);
+      const result = await logManualTransaction(request.auth!.userId, input, 'WEB');
+      return reply.status(201).send(result);
+    },
+  });
+
+  app.delete('/transactions/:id', {
+    preHandler: [app.requirePermission(Permission.MANAGE_OWN_TRANSACTIONS)],
+    handler: async (request) => {
+      const id = uuid.parse((request.params as { id: string }).id);
+      return deleteTransaction(request.auth!.userId, id, 'WEB');
+    },
+  });
+
   app.get('/transactions', {
     preHandler: [app.requirePermission(Permission.VIEW_OWN_TRANSACTIONS)],
     handler: async (request) => {

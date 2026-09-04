@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { ThemeToggle } from '@/components/layout/theme-toggle';
 import { isStaff, type NavItem } from '@/components/layout/nav-config';
+import { FloatingChat } from '@/components/dashboard/floating-chat';
 import { useSession } from '@/hooks/use-session';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/format';
@@ -133,6 +134,8 @@ export function AppShell({
           <X className="h-5 w-5" />
         </button>
       )}
+
+      {section === 'dashboard' && <FloatingChat />}
     </div>
   );
 }

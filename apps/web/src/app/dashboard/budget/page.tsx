@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input, Label } from '@/components/ui/input';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useApi } from '@/hooks/use-api';
 import { api, ApiError } from '@/lib/api';
@@ -22,17 +23,59 @@ interface Strategy {
   debtPercent: number;
 }
 
+type CustomSplit = Pick<Strategy, 'needsPercent' | 'wantsPercent' | 'savingsPercent' | 'investmentsPercent' | 'debtPercent'>;
+
 export default function BudgetPage() {
   const strategies = useApi<{ strategies: Strategy[] }>('/budget/strategies');
   const budget = useApi<BudgetStatus>('/budget/current');
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [custom, setCustom] = useState<CustomSplit>({
+    needsPercent: 50,
+    wantsPercent: 30,
+    savingsPercent: 20,
+    investmentsPercent: 0,
+    debtPercent: 0,
+  });
+
+  const customTotal =
+    custom.needsPercent + custom.wantsPercent + custom.savingsPercent + custom.investmentsPercent + custom.debtPercent;
 
   async function applyStrategy(strategy: string) {
+    if (strategy === 'CUSTOM') {
+      const preset = strategies.data?.strategies.find((s) => s.strategy === 'CUSTOM');
+      if (preset) {
+        setCustom({
+          needsPercent: preset.needsPercent,
+          wantsPercent: preset.wantsPercent,
+          savingsPercent: preset.savingsPercent,
+          investmentsPercent: preset.investmentsPercent,
+          debtPercent: preset.debtPercent,
+        });
+      }
+      setCustomOpen(true);
+      setError(null);
+      return;
+    }
     setSaving(strategy);
     setError(null);
     try {
       await api.post('/budget', { strategy });
+      budget.refetch();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not update budget');
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function applyCustom() {
+    setSaving('CUSTOM');
+    setError(null);
+    try {
+      await api.post('/budget', { strategy: 'CUSTOM', ...custom });
+      setCustomOpen(false);
       budget.refetch();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not update budget');
@@ -77,6 +120,60 @@ export default function BudgetPage() {
           );
         })}
       </div>
+
+      {customOpen && (
+        <div className="surface space-y-4 border-primary/30 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold">Custom split</h2>
+              <p className="text-xs text-muted-foreground">Define your own envelope percentages — they must add up to 100%.</p>
+            </div>
+            <span
+              className={cn(
+                'rounded-full px-3 py-1 text-sm font-semibold tabular',
+                customTotal === 100 ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive',
+              )}
+            >
+              {customTotal}%
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+            {(
+              [
+                ['needsPercent', 'Needs'],
+                ['wantsPercent', 'Wants'],
+                ['savingsPercent', 'Savings'],
+                ['investmentsPercent', 'Investments'],
+                ['debtPercent', 'Debt'],
+              ] as const
+            ).map(([field, label]) => (
+              <div key={field}>
+                <Label htmlFor={field}>{label}</Label>
+                <Input
+                  id={field}
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={custom[field]}
+                  onChange={(e) =>
+                    setCustom((prev) => ({ ...prev, [field]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCustomOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void applyCustom()} loading={saving === 'CUSTOM'} disabled={customTotal !== 100}>
+              Apply custom budget
+            </Button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>

@@ -40,5 +40,7 @@ export interface WhatsAppProvider {
   sendText(to: string, body: string): Promise<SendResult>;
   sendButtons(to: string, body: string, buttons: OutboundButton[]): Promise<SendResult>;
   sendAudio(to: string, audio: Buffer, mimeType: string): Promise<SendResult>;
+  /** Sends a chart/photo with a short caption underneath. */
+  sendImage(to: string, image: Buffer, caption?: string): Promise<SendResult>;
   downloadMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string }>;
 }

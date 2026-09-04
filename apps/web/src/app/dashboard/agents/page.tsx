@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea, Select } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { FormattedReply } from '@/components/dashboard/formatted-reply';
 import { useApi } from '@/hooks/use-api';
 import { api, ApiError } from '@/lib/api';
 import { formatRelative } from '@/lib/format';
@@ -175,7 +176,7 @@ export default function AgentsChatPage() {
                   m.role === 'USER' ? 'bg-primary text-primary-foreground' : 'bg-muted'
                 }`}
               >
-                {m.content}
+                <FormattedReply text={m.content} />
                 {m.agentKey && m.role === 'ASSISTANT' && (
                   <div className="mt-1.5">
                     <Badge tone="neutral" className="text-[10px]">

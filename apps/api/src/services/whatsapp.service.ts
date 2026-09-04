@@ -1,12 +1,92 @@
 import { Prisma, prisma } from '@flowmoney/database';
-import { AuditAction, WHATSAPP_LIMITS } from '@flowmoney/shared-types';
+import { AuditAction, ToolName, WHATSAPP_LIMITS } from '@flowmoney/shared-types';
+import type { BudgetStatus, FinancialHealth, PurchaseDecision } from '@flowmoney/shared-types';
 import { env } from '../config/env';
 import { recordAudit } from '../lib/audit';
-import { runConversationTurn } from './ai.service';
+import { runConversationTurn, type ConversationTurnResult } from './ai.service';
 import { loadUserAccess } from '../modules/auth/rbac';
 import { confirmPaymentIntent, pendingIntentFor } from './payment.service';
 import { synthesizeSpeech, transcribeAudio } from './speech.service';
+import { renderBudgetChart, renderHealthChart, renderPurchaseChart } from './chart.service';
 import { whatsappProvider, type InboundMessage } from './whatsapp';
+import type { WhatsAppProvider } from './whatsapp/provider';
+
+/**
+ * Picks a chart to accompany the reply from whatever the orchestrator's tool
+ * calls already computed this turn — never a second fetch, and never a chart
+ * type the user didn't actually ask about. Priority: a purchase evaluation is
+ * the most specific and valuable image; budget status next; health last.
+ */
+function chartFor(turn: ConversationTurnResult): Buffer | null {
+  const purchase = turn.invocations.find((i) => i.name === ToolName.EVALUATE_PURCHASE && i.ok)
+    ?.result as PurchaseDecision | undefined;
+  if (purchase && 'verdict' in purchase) return renderPurchaseChart(purchase);
+
+  const budget = turn.invocations.find((i) => i.name === ToolName.GET_BUDGET_STATUS && i.ok)?.result as
+    | BudgetStatus
+    | undefined;
+  if (budget && budget.categories) return renderBudgetChart(budget);
+
+  const health = turn.invocations.find((i) => i.name === ToolName.CALCULATE_FINANCIAL_HEALTH && i.ok)
+    ?.result as FinancialHealth | undefined;
+  if (health && health.components) return renderHealthChart(health);
+
+  return null;
+}
+
+/**
+ * Sends the turn's reply — as a chart image with the reply as caption when a
+ * chart applies, otherwise plain text.
+ *
+ * The canned "quick action" button prompt (Show detailed analysis / Create
+ * savings goal / …) only fires on the deterministic (no-LLM) path. With a
+ * real model in the loop the reply is already short and conversational —
+ * the user can just ask a natural follow-up ("why?", "what if I wait a
+ * month?") to expound on anything, so an auto-sent menu of canned buttons
+ * after every message is redundant and reads as robotic rather than helpful.
+ */
+async function sendReply(
+  provider: WhatsAppProvider,
+  to: string,
+  turn: ConversationTurnResult,
+): Promise<void> {
+  const body = turn.text.slice(0, WHATSAPP_LIMITS.maxBodyLength);
+  const chart = chartFor(turn);
+  const offerQuickActions = !turn.usedLLM && turn.quickActions.length > 0;
+
+  if (chart) {
+    const sent = await provider.sendImage(to, chart, body);
+    // Fall back to plain text so a chart-render or upload failure never costs
+    // the user their answer.
+    if (sent.status === 'FAILED') {
+      await provider.sendText(to, body);
+    }
+    if (offerQuickActions) {
+      await provider.sendButtons(
+        to,
+        'What next?',
+        turn.quickActions.slice(0, WHATSAPP_LIMITS.maxButtons).map((action, index) => ({
+          id: `qa_${index}_${action.command.slice(0, 20)}`,
+          title: action.label,
+        })),
+      );
+    }
+    return;
+  }
+
+  if (offerQuickActions) {
+    await provider.sendButtons(
+      to,
+      body,
+      turn.quickActions.slice(0, WHATSAPP_LIMITS.maxButtons).map((action, index) => ({
+        id: `qa_${index}_${action.command.slice(0, 20)}`,
+        title: action.label,
+      })),
+    );
+  } else {
+    await provider.sendText(to, body);
+  }
+}
 
 export interface InboundResult {
   status: 'PROCESSED' | 'IGNORED' | 'FAILED' | 'DUPLICATE';
@@ -181,19 +261,7 @@ export async function handleInboundMessage(message: InboundMessage): Promise<Inb
       currency: user.profile?.currency ?? 'INR',
     });
 
-    const body = turn.text.slice(0, WHATSAPP_LIMITS.maxBodyLength);
-    if (turn.quickActions.length > 0) {
-      await provider.sendButtons(
-        message.from,
-        body,
-        turn.quickActions.slice(0, WHATSAPP_LIMITS.maxButtons).map((action, index) => ({
-          id: `qa_${index}_${action.command.slice(0, 20)}`,
-          title: action.label,
-        })),
-      );
-    } else {
-      await provider.sendText(message.from, body);
-    }
+    await sendReply(provider, message.from, turn);
 
     // A voice note gets a voice reply back, when enabled.
     if (message.type === 'audio' && env.VOICE_REPLY_ENABLED && user.profile?.voiceRepliesEnabled) {

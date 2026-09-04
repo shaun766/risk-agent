@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.2",
     "@fastify/helmet": "^13.0.1",

@@ -64,6 +64,35 @@ export interface SavingsGoalView {
   monthsToTarget: number | null;
 }
 
+export interface LogTransactionInput {
+  amount: number;
+  direction: 'CREDIT' | 'DEBIT';
+  categoryKey: string;
+  description: string;
+  merchant?: string | null;
+  isRecurring?: boolean;
+}
+
+export interface LoggedTransactionView {
+  id: string;
+  amount: number;
+  direction: 'CREDIT' | 'DEBIT';
+  categoryKey: string;
+  categoryLabel: string;
+  description: string;
+  occurredAt: string;
+  accountMasked: string;
+  balanceAfter: number;
+}
+
+export interface DeletedTransactionView {
+  id: string;
+  amount: number;
+  direction: 'CREDIT' | 'DEBIT';
+  description: string;
+  balanceAfter: number;
+}
+
 export interface PaymentAuthorizationRequest {
   amount: number;
   merchant: string;
@@ -128,6 +157,16 @@ export interface ToolRuntime {
     userId: string,
     input: PaymentAuthorizationRequest,
   ): Promise<PaymentAuthorizationView>;
+  logTransaction(
+    userId: string,
+    input: LogTransactionInput,
+    options: { channel: ConversationChannel },
+  ): Promise<LoggedTransactionView>;
+  deleteTransaction(
+    userId: string,
+    transactionId: string,
+    options: { channel: ConversationChannel },
+  ): Promise<DeletedTransactionView>;
 }
 
 /** An agent as configured in the database. */
