@@ -1,0 +1,22 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+autoInstallPeers: true
+strictPeerDependencies: false
+nodeLinker: hoisted
+
+# pnpm 11 requires an explicit decision for every package with an install script.
+allowBuilds:
+  # esbuild ships prebuilt platform binaries through optional deps; its
+  # postinstall is only a verification step, so skipping it is safe.
+  esbuild: false
+  # Optional native accelerator for msgpackr (BullMQ); the JS fallback is fine.
+  msgpackr-extract: false
+  prisma: true
+  "@prisma/client": true
+  "@prisma/engines": true
+  "@tailwindcss/oxide": true
+  sharp: true
+  unrs-resolver: true
+  bcrypt: true

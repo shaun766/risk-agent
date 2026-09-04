@@ -1,0 +1,37 @@
+{
+  "name": "flowmoney-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FlowMoney AI — WhatsApp-first AI financial copilot with a deterministic financial engine.",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" build && pnpm --filter @flowmoney/api build && pnpm --filter @flowmoney/worker build && pnpm --filter @flowmoney/web build",
+    "build:packages": "pnpm -r --filter \"./packages/**\" build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "dev": "concurrently -n api,worker,web -c cyan,magenta,green \"pnpm --filter @flowmoney/api dev\" \"pnpm --filter @flowmoney/worker dev\" \"pnpm --filter @flowmoney/web dev\"",
+    "dev:api": "pnpm --filter @flowmoney/api dev",
+    "dev:web": "pnpm --filter @flowmoney/web dev",
+    "dev:worker": "pnpm --filter @flowmoney/worker dev",
+    "db:generate": "pnpm --filter @flowmoney/database generate",
+    "db:migrate": "pnpm --filter @flowmoney/database migrate",
+    "db:push": "pnpm --filter @flowmoney/database push",
+    "db:seed": "pnpm --filter @flowmoney/database seed",
+    "db:reset": "pnpm --filter @flowmoney/database reset",
+    "db:studio": "pnpm --filter @flowmoney/database studio",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "setup": "pnpm install && pnpm db:generate && pnpm build:packages"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

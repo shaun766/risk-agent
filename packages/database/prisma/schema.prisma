@@ -1,0 +1,1116 @@
+// FlowMoney AI — data model.
+//
+// Conventions:
+//   * UUID primary keys everywhere.
+//   * Money is Decimal(18,2) in major units (rupees). The financial engine
+//     converts to integer minor units at its boundary — see packages/shared-types/src/money.ts.
+//   * Every table carries createdAt/updatedAt.
+//   * Enum names mirror packages/shared-types/src/enums.ts exactly.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================ ENUMS ========
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+  CLOSED
+}
+
+enum BankAccountType {
+  SAVINGS
+  CURRENT
+  CREDIT_CARD
+  LOAN
+  FIXED_DEPOSIT
+  WALLET
+}
+
+enum BankAccountStatus {
+  ACTIVE
+  DORMANT
+  CLOSED
+}
+
+enum TransactionDirection {
+  CREDIT
+  DEBIT
+}
+
+enum TransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+  REVERSED
+}
+
+enum CategoryKind {
+  INCOME
+  ESSENTIAL
+  DISCRETIONARY
+  SAVINGS
+  INVESTMENT
+  DEBT
+  TRANSFER
+}
+
+enum BudgetStrategy {
+  BALANCED
+  AGGRESSIVE_SAVINGS
+  DEBT_REDUCTION
+  GROWTH_MODE
+  CUSTOM
+}
+
+enum BudgetRuleType {
+  CATEGORY_MAX
+  CATEGORY_MIN
+  SAVINGS_MIN
+  TOTAL_SPEND_MAX
+}
+
+enum SavingsGoalStatus {
+  ACTIVE
+  ACHIEVED
+  PAUSED
+  CANCELLED
+}
+
+enum PurchaseVerdict {
+  SMART_BUY
+  AFFORDABLE_BUT_CAUTION
+  WAIT_AND_SAVE
+  NOT_RECOMMENDED
+}
+
+enum RiskLevel {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum RiskTolerance {
+  CONSERVATIVE
+  MODERATE
+  AGGRESSIVE
+}
+
+enum InvestmentHorizon {
+  SHORT
+  MEDIUM
+  LONG
+}
+
+enum FinancialProductType {
+  SAVINGS_ACCOUNT
+  FIXED_DEPOSIT
+  RECURRING_DEPOSIT
+  LIQUID_FUND
+  DEBT_FUND
+  INDEX_FUND
+  EQUITY_FUND
+  GOLD
+  PPF
+  NPS
+  INSURANCE
+  CREDIT_CARD
+  LOAN
+}
+
+enum LiquidityLevel {
+  INSTANT
+  HIGH
+  MEDIUM
+  LOW
+  LOCKED
+}
+
+enum AllocationBucket {
+  EMERGENCY_FUND
+  LIQUID_RESERVE
+  LOW_RISK
+  LONG_TERM_GROWTH
+  DEBT_REPAYMENT
+  GOAL_FUNDING
+}
+
+enum ConversationChannel {
+  WHATSAPP
+  WEB
+  VOICE
+  API
+  SYSTEM
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum AgentOutputFormat {
+  CONVERSATIONAL
+  STRUCTURED_JSON
+  BULLET_SUMMARY
+  WHATSAPP_CARD
+}
+
+enum PaymentStatus {
+  REQUIRES_CONFIRMATION
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum NotificationType {
+  BUDGET_ALERT
+  PURCHASE_DECISION
+  MONTHLY_REPORT_READY
+  ANOMALY_DETECTED
+  SAVINGS_MILESTONE
+  IDLE_CASH_DETECTED
+  PAYMENT_STATUS
+  SYSTEM
+}
+
+enum NotificationChannel {
+  IN_APP
+  WHATSAPP
+  EMAIL
+}
+
+enum ReportStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+}
+
+enum VoiceInteractionStatus {
+  RECEIVED
+  TRANSCRIBING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum VoiceInteractionKind {
+  VOICE_NOTE
+  CALL
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+// ========================================================== IDENTITY =======
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique
+  passwordHash String
+  fullName     String
+  phone        String?    @unique
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  profile                 UserProfile?
+  roles                   UserRole[]
+  refreshTokens           RefreshToken[]
+  bankAccounts            BankAccount[]
+  transactions            Transaction[]
+  budgets                 Budget[]
+  savingsGoals            SavingsGoal[]
+  recurringObligations    RecurringObligation[]
+  snapshots               FinancialSnapshot[]
+  healthScores            FinancialHealthScore[]
+  purchaseDecisions       PurchaseDecision[]
+  investmentProfile       InvestmentProfile?
+  investmentRecommendations InvestmentRecommendation[]
+  portfolio               Portfolio?
+  monthlyReports          MonthlyReport[]
+  conversations           AIConversation[]
+  notifications           Notification[]
+  auditLogs               AuditLog[]
+  voiceInteractions       VoiceInteraction[]
+  paymentIntents          PaymentIntent[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model UserProfile {
+  id                        String    @id @default(uuid()) @db.Uuid
+  userId                    String    @unique @db.Uuid
+  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth               DateTime?
+  occupation                String?
+  employmentType            String?
+  city                      String?
+  country                   String    @default("IN")
+  currency                  String    @default("INR")
+  locale                    String    @default("en-IN")
+  timezone                  String    @default("Asia/Kolkata")
+  /// Self-declared monthly income; the engine prefers observed CREDIT inflows
+  /// and falls back to this when history is thin.
+  declaredMonthlyIncome     Decimal?  @db.Decimal(18, 2)
+  incomeDayOfMonth          Int       @default(1)
+  dependents                Int       @default(0)
+  emergencyFundTargetMonths Decimal   @default(6) @db.Decimal(5, 2)
+  /// Hard floor the user never wants to spend below.
+  emergencyReserveAmount    Decimal?  @db.Decimal(18, 2)
+  monthlyDebtPayments       Decimal   @default(0) @db.Decimal(18, 2)
+  totalDebtOutstanding      Decimal   @default(0) @db.Decimal(18, 2)
+  whatsappOptIn             Boolean   @default(false)
+  voiceRepliesEnabled       Boolean   @default(true)
+  onboardingCompleted       Boolean   @default(false)
+  avatarUrl                 String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@map("user_profiles")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the token — the raw value never touches the database.
+  tokenHash  String    @unique
+  familyId   String    @db.Uuid
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?   @db.Uuid
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ============================================================== RBAC =======
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String   @default("")
+  /// System roles cannot be deleted through the admin API.
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+  agents      AIAgent[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String   @default("")
+  group       String   @default("General")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+
+  @@index([group])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid()) @db.Uuid
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  roleId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedBy String?   @db.Uuid
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+// =========================================================== BANKING =======
+
+model Bank {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  code         String   @unique
+  logoUrl      String?
+  /// Which BankingProvider implementation services this bank.
+  providerKey  String   @default("mock")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts BankAccount[]
+  products FinancialProduct[]
+
+  @@map("banks")
+}
+
+model BankAccount {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @db.Uuid
+  bankId            String            @db.Uuid
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bank              Bank              @relation(fields: [bankId], references: [id])
+  /// Identifier at the provider — never the real account number.
+  externalId        String
+  /// Last four digits only; full numbers are never stored.
+  maskedNumber      String
+  nickname          String?
+  type              BankAccountType
+  status            BankAccountStatus @default(ACTIVE)
+  currency          String            @default("INR")
+  currentBalance    Decimal           @default(0) @db.Decimal(18, 2)
+  availableBalance  Decimal           @default(0) @db.Decimal(18, 2)
+  creditLimit       Decimal?          @db.Decimal(18, 2)
+  /// True for credit cards and loans: the balance reduces net worth.
+  isLiability       Boolean           @default(false)
+  isPrimary         Boolean           @default(false)
+  /// Marks the account the engine treats as the emergency fund.
+  isEmergencyFund   Boolean           @default(false)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  balances       AccountBalance[]
+  transactions   Transaction[]
+  paymentIntents PaymentIntent[]
+
+  @@unique([bankId, externalId])
+  @@index([userId, status])
+  @@index([userId, isPrimary])
+  @@map("bank_accounts")
+}
+
+/// Daily balance history — powers the balance chart and idle-cash averages.
+model AccountBalance {
+  id            String      @id @default(uuid()) @db.Uuid
+  bankAccountId String      @db.Uuid
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  balance       Decimal     @db.Decimal(18, 2)
+  available     Decimal     @db.Decimal(18, 2)
+  recordedAt    DateTime
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([bankAccountId, recordedAt])
+  @@index([bankAccountId, recordedAt])
+  @@map("account_balances")
+}
+
+model TransactionCategory {
+  id        String       @id @default(uuid()) @db.Uuid
+  key       String       @unique
+  label     String
+  kind      CategoryKind
+  icon      String       @default("CircleDashed")
+  colour    String       @default("#64748b")
+  isSystem  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  transactions     Transaction[]
+  budgetCategories BudgetCategory[]
+  merchants        Merchant[]
+
+  @@index([kind])
+  @@map("transaction_categories")
+}
+
+model Merchant {
+  id                 String               @id @default(uuid()) @db.Uuid
+  name               String               @unique
+  displayName        String
+  defaultCategoryId  String?              @db.Uuid
+  defaultCategory    TransactionCategory? @relation(fields: [defaultCategoryId], references: [id])
+  logoUrl            String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  transactions Transaction[]
+
+  @@map("merchants")
+}
+
+model Transaction {
+  id            String               @id @default(uuid()) @db.Uuid
+  userId        String               @db.Uuid
+  bankAccountId String               @db.Uuid
+  categoryId    String               @db.Uuid
+  merchantId    String?              @db.Uuid
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount   BankAccount          @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  category      TransactionCategory  @relation(fields: [categoryId], references: [id])
+  merchant      Merchant?            @relation(fields: [merchantId], references: [id])
+  externalId    String?
+  amount        Decimal              @db.Decimal(18, 2)
+  direction     TransactionDirection
+  status        TransactionStatus    @default(POSTED)
+  currency      String               @default("INR")
+  description   String
+  notes         String?
+  occurredAt    DateTime
+  postedAt      DateTime?
+  isRecurring   Boolean              @default(false)
+  /// Set when the transaction was created by an authorised in-app payment.
+  paymentIntentId String?            @db.Uuid
+  metadata      Json?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@unique([bankAccountId, externalId])
+  @@index([userId, occurredAt])
+  @@index([bankAccountId, occurredAt])
+  @@index([categoryId, occurredAt])
+  @@index([userId, direction, occurredAt])
+  @@index([merchantId])
+  @@map("transactions")
+}
+
+/// Known future commitments (rent, EMIs, subscriptions) used by the engine to
+/// reserve cash before declaring anything spendable.
+model RecurringObligation {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @db.Uuid
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label      String
+  amount     Decimal      @db.Decimal(18, 2)
+  categoryKey String
+  categoryKind CategoryKind
+  dueDay     Int
+  isActive   Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([userId, isActive])
+  @@map("recurring_obligations")
+}
+
+// ========================================================= BUDGETING =======
+
+model Budget {
+  id                  String         @id @default(uuid()) @db.Uuid
+  userId              String         @db.Uuid
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy            BudgetStrategy
+  /// YYYY-MM — one active budget per user per month.
+  month               String
+  periodStart         DateTime
+  periodEnd           DateTime
+  monthlyIncome       Decimal        @db.Decimal(18, 2)
+  needsPercent        Decimal        @db.Decimal(5, 2)
+  wantsPercent        Decimal        @db.Decimal(5, 2)
+  savingsPercent      Decimal        @db.Decimal(5, 2)
+  investmentsPercent  Decimal        @default(0) @db.Decimal(5, 2)
+  debtPercent         Decimal        @default(0) @db.Decimal(5, 2)
+  isActive            Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  categories BudgetCategory[]
+  rules      BudgetRule[]
+
+  @@unique([userId, month])
+  @@index([userId, isActive])
+  @@map("budgets")
+}
+
+model BudgetCategory {
+  id         String              @id @default(uuid()) @db.Uuid
+  budgetId   String              @db.Uuid
+  categoryId String              @db.Uuid
+  budget     Budget              @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  category   TransactionCategory @relation(fields: [categoryId], references: [id])
+  allocated  Decimal             @db.Decimal(18, 2)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@unique([budgetId, categoryId])
+  @@map("budget_categories")
+}
+
+model BudgetRule {
+  id          String         @id @default(uuid()) @db.Uuid
+  budgetId    String         @db.Uuid
+  budget      Budget         @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  type        BudgetRuleType
+  categoryKey String?
+  amount      Decimal        @db.Decimal(18, 2)
+  label       String
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([budgetId, isActive])
+  @@map("budget_rules")
+}
+
+model SavingsGoal {
+  id                  String            @id @default(uuid()) @db.Uuid
+  userId              String            @db.Uuid
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  targetAmount        Decimal           @db.Decimal(18, 2)
+  currentAmount       Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyContribution Decimal           @default(0) @db.Decimal(18, 2)
+  targetDate          DateTime?
+  categoryKey         String?
+  status              SavingsGoalStatus @default(ACTIVE)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@index([userId, status])
+  @@map("savings_goals")
+}
+
+// ================================================ SNAPSHOTS & SCORING ======
+
+/// An immutable record of the computed financial position at a moment in time.
+/// Purchase decisions reference the exact snapshot they were computed from,
+/// which is what makes a past decision reproducible and auditable.
+model FinancialSnapshot {
+  id                          String   @id @default(uuid()) @db.Uuid
+  userId                      String   @db.Uuid
+  user                        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asOf                        DateTime
+  totalBalance                Decimal  @db.Decimal(18, 2)
+  availableBalance            Decimal  @db.Decimal(18, 2)
+  netWorth                    Decimal  @db.Decimal(18, 2)
+  monthlyIncome               Decimal  @db.Decimal(18, 2)
+  totalSpentThisPeriod        Decimal  @db.Decimal(18, 2)
+  essentialExpensesRemaining  Decimal  @db.Decimal(18, 2)
+  discretionaryBudgetRemaining Decimal @db.Decimal(18, 2)
+  savingsTarget               Decimal  @db.Decimal(18, 2)
+  savingsProgress             Decimal  @db.Decimal(18, 2)
+  emergencyFundMonths         Decimal  @db.Decimal(6, 2)
+  safelySpendableCash         Decimal  @db.Decimal(18, 2)
+  projectedSavingsRatePercent Decimal  @db.Decimal(6, 2)
+  /// Full FinancialSnapshot object as returned by the engine.
+  payload                     Json
+  engineVersion               String
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  purchaseDecisions PurchaseDecision[]
+  healthScores      FinancialHealthScore[]
+
+  @@index([userId, asOf])
+  @@map("financial_snapshots")
+}
+
+model FinancialHealthScore {
+  id            String             @id @default(uuid()) @db.Uuid
+  userId        String             @db.Uuid
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshotId    String?            @db.Uuid
+  snapshot      FinancialSnapshot? @relation(fields: [snapshotId], references: [id])
+  score         Decimal            @db.Decimal(5, 2)
+  riskLevel     RiskLevel
+  /// YYYY-MM the score belongs to, for trend charts.
+  month         String
+  components    Json
+  strengths     Json
+  weaknesses    Json
+  engineVersion String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, month])
+  @@map("financial_health_scores")
+}
+
+model PurchaseDecision {
+  id                    String             @id @default(uuid()) @db.Uuid
+  userId                String             @db.Uuid
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshotId            String?            @db.Uuid
+  snapshot              FinancialSnapshot? @relation(fields: [snapshotId], references: [id])
+  conversationId        String?            @db.Uuid
+  description           String
+  merchant              String?
+  categoryKey           String
+  price                 Decimal            @db.Decimal(18, 2)
+  isRecurring           Boolean            @default(false)
+  monthlyCost           Decimal?           @db.Decimal(18, 2)
+  importance            Int                @default(3)
+  verdict               PurchaseVerdict
+  score                 Decimal            @db.Decimal(5, 2)
+  confidence            Decimal            @db.Decimal(5, 2)
+  affordabilityGap      Decimal            @db.Decimal(18, 2)
+  budgetImpactPercentage Decimal           @db.Decimal(10, 2)
+  primaryReasons        Json
+  /// Full PurchaseDecision object from the engine.
+  payload               Json
+  /// The natural-language explanation the LLM produced from `payload`.
+  explanation           String?
+  channel               ConversationChannel @default(WEB)
+  wasPurchased          Boolean            @default(false)
+  engineVersion         String
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  factors        PurchaseDecisionFactor[]
+  paymentIntents PaymentIntent[]
+
+  @@index([userId, createdAt])
+  @@index([userId, verdict])
+  @@index([verdict, createdAt])
+  @@map("purchase_decisions")
+}
+
+model PurchaseDecisionFactor {
+  id           String           @id @default(uuid()) @db.Uuid
+  decisionId   String           @db.Uuid
+  decision     PurchaseDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  key          String
+  label        String
+  score        Decimal          @db.Decimal(6, 2)
+  weight       Decimal          @db.Decimal(5, 4)
+  contribution Decimal          @db.Decimal(6, 2)
+  detail       String
+  inputs       Json
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([decisionId])
+  @@map("purchase_decision_factors")
+}
+
+// ======================================================= INVESTMENTS =======
+
+model InvestmentProfile {
+  id                        String            @id @default(uuid()) @db.Uuid
+  userId                    String            @unique @db.Uuid
+  user                      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  riskTolerance             RiskTolerance     @default(MODERATE)
+  horizon                   InvestmentHorizon @default(MEDIUM)
+  monthlyInvestmentCapacity Decimal           @default(0) @db.Decimal(18, 2)
+  hasEmergencyFund          Boolean           @default(false)
+  liquidityNeedsMonths      Decimal           @default(6) @db.Decimal(5, 2)
+  experienceLevel           String            @default("BEGINNER")
+  goals                     Json              @default("[]")
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+
+  @@map("investment_profiles")
+}
+
+model InvestmentRecommendation {
+  id            String            @id @default(uuid()) @db.Uuid
+  userId        String            @db.Uuid
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  surplusCash   Decimal           @db.Decimal(18, 2)
+  /// Array of AllocationSuggestion from the engine.
+  allocations   Json
+  disclaimer    String
+  riskLevel     RiskLevel
+  engineVersion String
+  explanation   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("investment_recommendations")
+}
+
+model Portfolio {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @unique @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String   @default("Primary Portfolio")
+  totalValue Decimal  @default(0) @db.Decimal(18, 2)
+  totalCost  Decimal  @default(0) @db.Decimal(18, 2)
+  currency   String   @default("INR")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  holdings Holding[]
+
+  @@map("portfolios")
+}
+
+model Holding {
+  id           String               @id @default(uuid()) @db.Uuid
+  portfolioId  String               @db.Uuid
+  portfolio    Portfolio            @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  productId    String?              @db.Uuid
+  product      FinancialProduct?    @relation(fields: [productId], references: [id])
+  name         String
+  type         FinancialProductType
+  units        Decimal              @default(0) @db.Decimal(18, 4)
+  investedAmount Decimal            @db.Decimal(18, 2)
+  currentValue Decimal              @db.Decimal(18, 2)
+  bucket       AllocationBucket?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([portfolioId])
+  @@map("holdings")
+}
+
+model FinancialProduct {
+  id                 String               @id @default(uuid()) @db.Uuid
+  bankId             String?              @db.Uuid
+  bank               Bank?                @relation(fields: [bankId], references: [id])
+  name               String
+  type               FinancialProductType
+  riskLevel          RiskLevel
+  liquidity          LiquidityLevel
+  minimumInvestment  Decimal              @default(0) @db.Decimal(18, 2)
+  interestRate       Decimal              @default(0) @db.Decimal(6, 3)
+  expectedReturnLow  Decimal              @default(0) @db.Decimal(6, 3)
+  expectedReturnHigh Decimal              @default(0) @db.Decimal(6, 3)
+  lockInMonths       Int                  @default(0)
+  description        String               @default("")
+  bucket             AllocationBucket?
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  rates    FinancialProductRate[]
+  holdings Holding[]
+
+  @@index([type, isActive])
+  @@index([bucket, isActive])
+  @@map("financial_products")
+}
+
+model FinancialProductRate {
+  id          String           @id @default(uuid()) @db.Uuid
+  productId   String           @db.Uuid
+  product     FinancialProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenureMonths Int
+  rate        Decimal          @db.Decimal(6, 3)
+  minAmount   Decimal          @default(0) @db.Decimal(18, 2)
+  maxAmount   Decimal?         @db.Decimal(18, 2)
+  effectiveFrom DateTime       @default(now())
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([productId, tenureMonths, effectiveFrom])
+  @@map("financial_product_rates")
+}
+
+// ============================================================ REPORTS ======
+
+model MonthlyReport {
+  id            String       @id @default(uuid()) @db.Uuid
+  userId        String       @db.Uuid
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// YYYY-MM
+  month         String
+  status        ReportStatus @default(PENDING)
+  /// Full MonthlyReportData object from the engine.
+  data          Json
+  /// LLM narrative generated from `data`.
+  narrative     String?
+  pdfUrl        String?
+  generatedAt   DateTime?
+  engineVersion String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([userId, month])
+  @@index([userId, month])
+  @@map("monthly_reports")
+}
+
+// ============================================================== AI =========
+
+model AIAgent {
+  id                  String            @id @default(uuid()) @db.Uuid
+  key                 String            @unique
+  name                String
+  description         String            @default("")
+  systemInstructions  String
+  outputFormat        AgentOutputFormat @default(CONVERSATIONAL)
+  /// Intents this agent is willing to handle, used by the router.
+  handledIntents      Json              @default("[]")
+  requiredPermissions Json              @default("[]")
+  temperature         Decimal           @default(0.3) @db.Decimal(3, 2)
+  maxTokens           Int               @default(900)
+  model               String?
+  isEnabled           Boolean           @default(true)
+  isSystem            Boolean           @default(false)
+  priority            Int               @default(100)
+  /// Optional role gate — only users holding this role can reach the agent.
+  restrictedToRoleId  String?           @db.Uuid
+  restrictedToRole    Role?             @relation(fields: [restrictedToRoleId], references: [id])
+  createdById         String?           @db.Uuid
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  toolPermissions AgentToolPermission[]
+  configurations  AIAgentConfiguration[]
+  conversations   AIConversation[]
+  messages        AIMessage[]
+
+  @@index([isEnabled, priority])
+  @@map("ai_agents")
+}
+
+model AgentToolPermission {
+  id        String   @id @default(uuid()) @db.Uuid
+  agentId   String   @db.Uuid
+  agent     AIAgent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  toolName  String
+  isEnabled Boolean  @default(true)
+  /// Optional per-tool argument constraints, e.g. { "maxLookbackDays": 90 }.
+  constraints Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, toolName])
+  @@map("agent_tool_permissions")
+}
+
+/// Versioned snapshots of an agent's configuration so a past AI response can be
+/// replayed with the exact instructions that produced it.
+model AIAgentConfiguration {
+  id        String   @id @default(uuid()) @db.Uuid
+  agentId   String   @db.Uuid
+  agent     AIAgent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  version   Int
+  config    Json
+  changedBy String?  @db.Uuid
+  note      String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, version])
+  @@map("ai_agent_configurations")
+}
+
+model AIConversation {
+  id           String              @id @default(uuid()) @db.Uuid
+  userId       String              @db.Uuid
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentId      String?             @db.Uuid
+  agent        AIAgent?            @relation(fields: [agentId], references: [id])
+  channel      ConversationChannel
+  title        String?
+  /// Provider thread id (e.g. WhatsApp wa_id) so inbound messages find the thread.
+  externalRef  String?
+  lastMessageAt DateTime           @default(now())
+  isArchived   Boolean             @default(false)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  messages          AIMessage[]
+  voiceInteractions VoiceInteraction[]
+
+  @@index([userId, channel, createdAt])
+  @@index([externalRef])
+  @@map("ai_conversations")
+}
+
+model AIMessage {
+  id             String         @id @default(uuid()) @db.Uuid
+  conversationId String         @db.Uuid
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agentId        String?        @db.Uuid
+  agent          AIAgent?       @relation(fields: [agentId], references: [id])
+  role           MessageRole
+  content        String
+  /// Detected intent for USER messages.
+  intent         String?
+  intentConfidence Decimal?     @db.Decimal(5, 2)
+  /// Tool calls made while producing an ASSISTANT message.
+  toolCalls      Json?
+  structured     Json?
+  snapshotId     String?        @db.Uuid
+  model          String?
+  usedLLM        Boolean        @default(false)
+  promptTokens   Int?
+  completionTokens Int?
+  latencyMs      Int?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+model VoiceInteraction {
+  id             String                 @id @default(uuid()) @db.Uuid
+  userId         String                 @db.Uuid
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String?                @db.Uuid
+  conversation   AIConversation?        @relation(fields: [conversationId], references: [id])
+  kind           VoiceInteractionKind   @default(VOICE_NOTE)
+  status         VoiceInteractionStatus @default(RECEIVED)
+  channel        ConversationChannel    @default(WHATSAPP)
+  externalMediaId String?
+  audioUrl       String?
+  durationSeconds Int?
+  transcript     String?
+  transcriptConfidence Decimal?         @db.Decimal(5, 2)
+  responseText   String?
+  responseAudioUrl String?
+  error          String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("voice_interactions")
+}
+
+// ========================================================== PAYMENTS =======
+
+/// Payments are always two-step: the AI can create an intent, but only an
+/// explicit user confirmation moves money.
+model PaymentIntent {
+  id                 String            @id @default(uuid()) @db.Uuid
+  userId             String            @db.Uuid
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccountId      String            @db.Uuid
+  bankAccount        BankAccount       @relation(fields: [bankAccountId], references: [id])
+  purchaseDecisionId String?           @db.Uuid
+  purchaseDecision   PurchaseDecision? @relation(fields: [purchaseDecisionId], references: [id])
+  amount             Decimal           @db.Decimal(18, 2)
+  currency           String            @default("INR")
+  merchant           String
+  description        String            @default("")
+  categoryKey        String            @default("shopping")
+  status             PaymentStatus     @default(REQUIRES_CONFIRMATION)
+  /// The exact phrase the user must send back to authorise this payment.
+  confirmationPhrase String
+  providerKey        String            @default("mock")
+  providerRef        String?
+  authorizedAt       DateTime?
+  authorizedVia      ConversationChannel?
+  completedAt        DateTime?
+  expiresAt          DateTime
+  failureReason      String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([userId, status])
+  @@index([status, expiresAt])
+  @@map("payment_intents")
+}
+
+// ===================================================== PLATFORM / OPS ======
+
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @db.Uuid
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  channel   NotificationChannel @default(IN_APP)
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// The account acted upon, when an admin acts on behalf of a customer.
+  subjectId  String?  @db.Uuid
+  action     String
+  resource   String?
+  resourceId String?
+  channel    String   @default("API")
+  ipAddress  String?
+  userAgent  String?
+  requestId  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([resourceId])
+  @@map("audit_logs")
+}
+
+model WebhookEvent {
+  id          String        @id @default(uuid()) @db.Uuid
+  provider    String
+  eventType   String
+  /// Provider-side id, used for idempotent replay protection.
+  externalId  String
+  status      WebhookStatus @default(RECEIVED)
+  signatureValid Boolean    @default(false)
+  payload     Json
+  error       String?
+  processedAt DateTime?
+  attempts    Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([provider, externalId])
+  @@index([status, createdAt])
+  @@map("webhook_events")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  value     Json
+  updatedBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}

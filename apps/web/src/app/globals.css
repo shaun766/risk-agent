@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 99%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 243 75% 96%;
+    --accent-foreground: 243 75% 35%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 61% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 243 75% 59%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 224 47% 7%;
+    --foreground: 210 40% 96%;
+    --card: 223 43% 10%;
+    --card-foreground: 210 40% 96%;
+    --popover: 223 43% 10%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 243 90% 70%;
+    --primary-foreground: 224 47% 7%;
+    --secondary: 223 30% 16%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 223 30% 16%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 243 45% 20%;
+    --accent-foreground: 243 90% 85%;
+    --destructive: 0 63% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 45%;
+    --success-foreground: 224 47% 7%;
+    --warning: 32 90% 55%;
+    --warning-foreground: 224 47% 7%;
+    --border: 223 25% 20%;
+    --input: 223 25% 20%;
+    --ring: 243 90% 70%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Financial figures should align vertically in tables and cards. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-lg border border-border bg-card text-card-foreground;
+  }
+
+  .surface-hover {
+    @apply transition-colors hover:border-primary/40 hover:bg-accent/40;
+  }
+
+  .stat-label {
+    @apply text-xs font-medium uppercase tracking-wide text-muted-foreground;
+  }
+
+  .stat-value {
+    @apply tabular text-2xl font-semibold tracking-tight;
+  }
+
+  /* Subtle gradient used behind hero panels and the score ring. */
+  .mesh {
+    background-image:
+      radial-gradient(at 12% 8%, hsl(var(--primary) / 0.18) 0px, transparent 55%),
+      radial-gradient(at 88% 0%, hsl(200 90% 55% / 0.14) 0px, transparent 50%),
+      radial-gradient(at 55% 100%, hsl(152 61% 45% / 0.1) 0px, transparent 45%);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-border;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/40;
+}

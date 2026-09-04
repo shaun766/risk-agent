@@ -1,0 +1,114 @@
+# FlowMoney AI — local/dev-parity stack.
+#   docker compose up -d postgres redis minio   # infra only, run apps with `pnpm dev`
+#   docker compose --profile full up -d         # everything, including the built apps
+#
+# Every app reads its config from the single root .env (see .env.example).
+
+x-app-env: &app-env
+  env_file:
+    - .env
+  environment:
+    DATABASE_URL: postgresql://flowmoney:flowmoney@postgres:5432/flowmoney?schema=public
+    REDIS_URL: redis://redis:6379
+    S3_ENDPOINT: http://minio:9000
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flowmoney
+      POSTGRES_PASSWORD: flowmoney
+      POSTGRES_DB: flowmoney
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowmoney -d flowmoney"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # S3-compatible object storage, used when STORAGE_DRIVER=s3 (defaults to
+  # STORAGE_DRIVER=local, which just writes to ./storage — MinIO is optional
+  # for local dev but included so the S3 code path is exercisable end to end).
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: flowmoney
+      MINIO_ROOT_PASSWORD: flowmoney123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---- built application containers (profile: full) ------------------------
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    <<: *app-env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        # Baked into .next/routes-manifest.json at build time — `next start`
+        # never re-reads it, so this has to be the in-network service name
+        # up front, not something overridable via `environment:` at runtime.
+        API_INTERNAL_URL: http://api:4000
+        NEXT_PUBLIC_API_URL: http://localhost:4000
+        NEXT_PUBLIC_APP_NAME: FlowMoney AI
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
